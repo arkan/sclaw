@@ -31,7 +31,7 @@ docs/               → Documentation
 
 | Category | Interface | Examples |
 |----------|-----------|---------|
-| Channels | `Channel` | Telegram, Discord, WhatsApp, WebChat |
+| Channels | `Channel` | Telegram, Discord, WhatsApp |
 | Providers | `Provider` | Anthropic, OpenAI, Ollama |
 | Tools | `Tool` | Web search, shell, file read/write |
 | Memory | `MemoryStore` | SQLite, LanceDB, PostgreSQL |
