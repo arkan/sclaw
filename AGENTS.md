@@ -2,7 +2,9 @@
 
 ## Overview
 
-`sclaw` is a Go CLI tool. Module path: `github.com/flemzord/sclaw`.
+`sclaw` is a Go CLI tool.
+Module path: `github.com/flemzord/sclaw`
+Repository: `https://github.com/flemzord/sclaw`
 
 ## Architecture
 
