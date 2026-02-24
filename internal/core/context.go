@@ -4,6 +4,8 @@ package core
 import (
 	"fmt"
 	"log/slog"
+
+	"gopkg.in/yaml.v3"
 )
 
 // AppContext carries shared resources available to modules during provisioning
@@ -18,7 +20,8 @@ type AppContext struct {
 	// Workspace is the working directory for the current agent/session.
 	Workspace string
 
-	parentLogger *slog.Logger
+	parentLogger  *slog.Logger
+	moduleConfigs map[string]yaml.Node
 }
 
 // NewAppContext creates a new AppContext with the given base logger and directories.
@@ -34,19 +37,32 @@ func NewAppContext(logger *slog.Logger, dataDir, workspace string) *AppContext {
 	}
 }
 
+// WithModuleConfigs returns a copy of the AppContext with module configurations set.
+// Each key is a module ID mapping to its raw YAML configuration node.
+func (ctx *AppContext) WithModuleConfigs(configs map[string]yaml.Node) *AppContext {
+	cp := *ctx
+	cp.moduleConfigs = configs
+	return &cp
+}
+
 // ForModule returns a new AppContext scoped to the given module ID,
 // with a child logger that includes the module ID.
 func (ctx *AppContext) ForModule(id ModuleID) *AppContext {
 	return &AppContext{
-		Logger:       ctx.parentLogger.With("module", string(id)),
-		DataDir:      ctx.DataDir,
-		Workspace:    ctx.Workspace,
-		parentLogger: ctx.parentLogger,
+		Logger:        ctx.parentLogger.With("module", string(id)),
+		DataDir:       ctx.DataDir,
+		Workspace:     ctx.Workspace,
+		parentLogger:  ctx.parentLogger,
+		moduleConfigs: ctx.moduleConfigs,
 	}
 }
 
 // LoadModule instantiates and provisions a module by its ID.
-// It calls Provision and Validate if the module implements those interfaces.
+// It calls Configure, Provision and Validate if the module implements
+// those interfaces. The lifecycle order is:
+//
+//	New() → Configure() → Provision() → Validate()
+//
 // Returns the provisioned module instance ready for use.
 func (ctx *AppContext) LoadModule(id string) (Module, error) {
 	info, ok := GetModule(id)
@@ -55,6 +71,14 @@ func (ctx *AppContext) LoadModule(id string) (Module, error) {
 	}
 
 	mod := info.New()
+
+	if c, ok := mod.(Configurable); ok {
+		if node, exists := ctx.moduleConfigs[id]; exists {
+			if err := c.Configure(node); err != nil {
+				return nil, fmt.Errorf("configuring module %s: %w", id, err)
+			}
+		}
+	}
 
 	if p, ok := mod.(Provisioner); ok {
 		moduleCtx := ctx.ForModule(info.ID)

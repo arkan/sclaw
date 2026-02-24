@@ -1,6 +1,17 @@
 package core
 
-import "context"
+import (
+	"context"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Configurable is implemented by modules that accept YAML configuration.
+// Called after instantiation and before Provision().
+// The node contains the raw YAML for this module's config section.
+type Configurable interface {
+	Configure(node yaml.Node) error
+}
 
 // Provisioner is implemented by modules that need setup after instantiation.
 // This is where modules should set defaults, validate raw config,

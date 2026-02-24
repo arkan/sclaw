@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/flemzord/sclaw/internal/config"
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/spf13/cobra"
 )
@@ -55,24 +56,36 @@ func versionCmd() *cobra.Command {
 }
 
 func startCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start sclaw with all configured modules",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfgPath, _ := cmd.Flags().GetString("config")
+			if cfgPath == "" {
+				resolved, err := resolveConfigPath()
+				if err != nil {
+					return err
+				}
+				cfgPath = resolved
+			}
+
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				return err
+			}
+			if err := config.Validate(cfg); err != nil {
+				return err
+			}
+
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: slog.LevelInfo,
 			}))
 
 			appCtx := core.NewAppContext(logger, defaultDataDir(), defaultWorkspace())
+			appCtx = appCtx.WithModuleConfigs(cfg.Modules)
+
 			app := core.NewApp(appCtx)
-
-			// Phase 1: load all registered modules (no config filtering yet).
-			mods := core.GetModules()
-			ids := make([]string, 0, len(mods))
-			for _, mod := range mods {
-				ids = append(ids, string(mod.ID))
-			}
-
+			ids := config.Resolve(cfg)
 			if err := app.LoadModules(ids); err != nil {
 				return err
 			}
@@ -80,6 +93,8 @@ func startCmd() *cobra.Command {
 			return app.Run()
 		},
 	}
+	cmd.Flags().StringP("config", "c", "", "Path to configuration file")
+	return cmd
 }
 
 func configCmd() *cobra.Command {
@@ -88,25 +103,61 @@ func configCmd() *cobra.Command {
 		Short: "Configuration management",
 	}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "check",
+		Use:   "check <path>",
 		Short: "Validate configuration",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, err := config.Load(args[0])
+			if err != nil {
+				return err
+			}
+			if err := config.Validate(cfg); err != nil {
+				return err
+			}
+
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: slog.LevelInfo,
 			}))
 			appCtx := core.NewAppContext(logger, defaultDataDir(), defaultWorkspace())
+			appCtx = appCtx.WithModuleConfigs(cfg.Modules)
 
-			for _, info := range core.GetModules() {
-				if _, err := appCtx.LoadModule(string(info.ID)); err != nil {
-					return fmt.Errorf("module %s: %w", info.ID, err)
+			ids := config.Resolve(cfg)
+			for _, id := range ids {
+				if _, err := appCtx.LoadModule(id); err != nil {
+					return fmt.Errorf("module %s: %w", id, err)
 				}
 			}
 
-			fmt.Println("Configuration OK")
+			fmt.Printf("Configuration OK (%d modules)\n", len(ids))
+			for _, id := range ids {
+				fmt.Printf("  %s\n", id)
+			}
 			return nil
 		},
 	})
 	return cmd
+}
+
+// resolveConfigPath searches for a config file in standard locations.
+// Search order: $XDG_CONFIG_HOME/sclaw/sclaw.yaml → ./sclaw.yaml
+func resolveConfigPath() (string, error) {
+	candidates := []string{}
+
+	if xdg, ok := os.LookupEnv("XDG_CONFIG_HOME"); ok {
+		candidates = append(candidates, filepath.Join(xdg, "sclaw", "sclaw.yaml"))
+	} else if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".config", "sclaw", "sclaw.yaml"))
+	}
+
+	candidates = append(candidates, "sclaw.yaml")
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("no configuration file found (searched: %v)", candidates)
 }
 
 func defaultDataDir() string {

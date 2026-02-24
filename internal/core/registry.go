@@ -83,3 +83,8 @@ func resetRegistry() {
 	defer modulesMu.Unlock()
 	modules = make(map[string]ModuleInfo)
 }
+
+// ResetRegistry clears the registry. Exported for use in sibling package tests.
+func ResetRegistry() {
+	resetRegistry()
+}
